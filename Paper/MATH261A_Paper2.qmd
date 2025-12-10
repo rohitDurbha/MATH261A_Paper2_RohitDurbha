@@ -1,0 +1,821 @@
+---
+title: "When Waste Becomes Risk: Modeling the Drivers of Toxic Chemical Release Occurrence in U.S. Facilities"
+abstract: " This study analyzes facility–chemical records from the 2024 EPA Toxics Release Inventory (TRI) to understand how production activity, waste management practices, chemical hazard classifications, and industry sector relate to on-site chemical releases. Initially, the study fits a multiple linear regression model using total release amounts as the continuous response. Diagnostic plots and residual patterns reveal that the model breaks the assumptions of linearity, constant variance, and normality, driven by the skewed and zero-inflated distribution of release totals. The model provides little predictive accuracy and shows that it is not suitable for explaining variation in raw TRI release quantities. To address these limitations, The study then models the probability of any on-site release using logistic regression. This approach aligns the method with the binary nature of most TRI outcomes and yields interpretable, meaningful results. Production-related waste, one-time releases, and hazard indicators such as PBT (persistent, bioaccumulative, and toxic) and Clean Air Act chemical status significantly increase the odds of reporting a release. Calibration and residual diagnostics show that the logistic model fits the data better than the linear regression model did on the raw release amounts and captures meaningful structure in release behavior. Together, these findings demonstrate that logistic regression offers a more appropriate and informative framework for understanding the factors associated with on-site chemical releases in the TRI data."
+author: "Prasanna Sai Rohit Durbha"
+date: today
+date-format: long
+format:
+  pdf:
+    number-sections: true
+    extra_dependencies: ["float"]
+bibliography: references.bib
+---
+
+## Introduction
+
+The Toxics Release Inventory (TRI) is a long-running U.S. Environmental Protection Agency (EPA) program that requires certain industrial facilities to report, each year, how they manage and release specified toxic chemicals [@epa_tri_basic_data; @epa_tri_program]. TRI data are widely used by communities, researchers, and policymakers to monitor potential environmental hazards, track progress in pollution prevention, and evaluate regulatory policies. Every TRI reporting form includes details such as facility location, industry sector, chemical identity, on-site releases to air, water, and land, transfers to other sites, and quantities managed through recycling, energy recovery, and treatment [@epa_tri_basic_data; @epa_tri_reporting].
+
+Public discussions of TRI data often emphasize the *amount* of chemicals released—such as “total pounds released to air in a state”. But, from a regulatory and risk-screening perspective, a more basic question is also important: **under what conditions do facilities release toxic chemicals at all?** Not every facility–chemical combination in TRI results in an on-site release; many facilities may instead recycle, treat, or transfer chemicals off site. Moreover, when we look at on-site release amounts across all facility–chemical records, the distribution is zero-inflated, i.e.., most records are exactly zero, and a relatively small number have very large positive values. This structure presents substantial challenges for traditional multiple linear regression, which assumes approximately normal, homoscedastic errors. This study focuses on the following research question: **Among facilities reporting to the 2024 TRI, which facility-, operation-, and chemical-level characteristics are associated with a higher probability that a facility reports any on-site release of a given toxic chemical?**
+
+To explore this, We initially fit a multiple linear regression (MLR) model with the continuous on-site release total as the response and several facility and chemical predictors. Diagnostic plots reveal severe violations of linear model assumptions due to zero inflation, extreme skewness, and heteroskedasticity. We then reformulate the problem as a binary outcome, whether any on-site release occurred—and fit a logistic regression model. This logistic framework is more appropriate because it directly models the probability of a release event and respects the discrete nature of the outcome.
+
+The findings indicate that operational intensity (as measured by production ratio and total production-related waste), non-routine one-time releases, federal facility status, and chemical hazard classifications (including PBT, carcinogen, and Clean Air Act hazardous air pollutant indicators) are all associated with substantially higher odds of reporting an on-site release. The remainder of the report is structured as follows. Section @sec-data describes the 2024 TRI Basic Data File, the observational units, and the variables used. Section @sec-methods introduces both the multiple linear and logistic regression models, explains their assumptions, and discusses the LASSO regularization approach. Section @sec-results presents the main model results and interprets the key coefficients. Section @sec-discussion reflects on the implications, limitations, and why logistic regression is better aligned with the research question and dataset.
+
+---
+
+## Data {#sec-data}
+
+### Observational units and population
+
+The data comes from the **2024 TRI Basic Data File**, which the EPA describes as containing “the data elements most frequently requested by TRI data users,” including facility information, chemical identification, on-site release quantities, off-site transfers, and summary waste-management data [@epa_tri_basic_data]. Each **row** in this Basic Data File represents a **single facility–chemical–year record**. Concretely:
+
+- A *facility* is a specific industrial site (for example, a chemical plant or metal fabrication facility) that meets TRI reporting thresholds.
+- A *chemical* is one TRI-listed substance (or chemical category) covered under the TRI program. (LIST SOME EXAMPLE CHEMICALS)
+- For the **2024** reporting year, a facility that handles three TRI chemicals will contribute three rows—one row per chemical.
+
+Therefore, the observational unit in this analysis is:
+
+> **One facility–chemical record for the 2024 TRI reporting year.**
+
+Some facilities appear multiple times in the dataset if they handle multiple chemicals. Some chemicals also appear in many facilities. The analysis generalizes to the population of **all facilities subject to TRI reporting requirements in 2024** in the United States, recognizing that TRI is not a simple random sample but effectively a census of covered facilities and chemicals [@epa_tri_program; @epa_tri_reporting].
+
+### Response variables
+
+For this project I consider **two** different response variables, one for a multiple linear regression model and the other for a logistic regression model.
+
+1. **Continuous response for MLR: ON-SITE RELEASE TOTAL**
+
+   The TRI Basic Data File provides several columns summarizing different on-site release pathways (for example, fugitive air emissions, stack air emissions, discharges to surface water, and various land disposal categories). These are combined into:
+
+   - **ON-SITE RELEASE TOTAL** (in pounds): the total quantity of the chemical released on site via all reported media during the year.
+
+   This continuous measure is the natural candidate for a multiple linear regression model, because it directly quantifies environmental burden at the facility–chemical level. However, as discussed later, its statistical properties (many zeros and a heavy right tail) lead to severe violations of linear model assumptions.
+
+2. **Binary response for logistic regression: RELEASE_FLAG**
+
+   To address zero inflation and to align more directly with the research question about *whether* any release occurs, I construct a binary indicator:
+
+   - **RELEASE_FLAG** = 1 if `ON-SITE RELEASE TOTAL` > 0 (i.e., any positive on-site release is reported for that facility–chemical in 2024);  
+   - **RELEASE_FLAG** = 0 if `ON-SITE RELEASE TOTAL` = 0 (no on-site release of that chemical is reported for that facility).
+
+   This binary outcome is much better suited to logistic regression, which models the probability that a release occurs rather than the magnitude of the release.
+
+### Predictor variables: definitions 
+
+The TRI Basic Data File includes many variables. For this analysis I select a set of predictors that are both substantively meaningful and consistently reported across facilities [@epa_tri_basic_data; @epa_tri_reporting]. For each variable, I explain what it represents in plain language and why it is relevant to predicting releases.
+
+- **PRODUCTION RATIO** (numeric)  
+  This is a self-reported ratio comparing the facility’s production in the current year to production in a baseline or previous year. A value greater than 1 indicates increased production, while a value less than 1 indicates reduced production. Higher production typically implies more chemical use and more waste streams, which could increase both routine and non-routine releases. Facilities with rapidly increasing production may have less time to adjust pollution controls.
+
+- **PRODUCTION WSTE** (numeric)  
+  This is the **total production-related waste** for the chemical as reported under TRI Section 8.1–8.7. It aggregates quantities released, recycled, used for energy recovery, and treated, but only those associated with normal production activities. Production-related waste summarizes the overall scale of the chemical’s throughput in the facility. Facilities generating more waste are likely to handle larger quantities of the chemical and therefore may face greater challenges in preventing releases.
+
+- **TREATMENT ON SITE** (numeric)  
+  This is the amount of the chemical waste that is treated on site (for example, through physical, chemical, or biological treatment) to reduce its hazard or volume.  Facilities with substantial on-site treatment may either indicate high waste burdens (increasing potential release opportunities) or strong pollution control infrastructure (possibly reducing releases). Including this variable allows the model to test which pattern dominates in practice.
+
+- **RECYCLING ON SITE** (numeric)  
+  This represents the quantity of the chemical that is recycled within the facility rather than being released or transferred off site. On-site recycling can indicate more integrated resource management. It may either correlate with better pollution prevention (if recycling replaces disposal) or with large operational scale. The sign of the coefficient helps distinguish these possibilities.
+
+- **ONE-TIME RELEASE** (numeric)  
+  This variable captures **non-routine or one-time releases**, such as accidental spills, equipment failures, or other unusual events, reported under TRI’s one-time release categories. One-time releases are directly related to environmental incidents. While they are themselves a type of release, they can also serve as a signal of underlying process instability or risk. Including this variable helps separate routine operational behavior from exceptional events.
+
+- **INDUSTRY SECTOR** (categorical)  
+  This factor encodes the facility’s industry sector based on North American Industry Classification System (NAICS) codes mapped into EPA TRI categories (for example, *Chemicals*, *Petroleum*, *Fabricated Metals*, *Food*, *Paper*). Different industries use different processes, chemicals, and technologies. Some sectors are intrinsically more emission-intensive than others. By including industry sector as a categorical predictor, the model can control for broad structural differences across industries.
+
+- **FEDERAL FACILITY** (categorical: YES/NO)  
+  This indicator identifies whether the facility is owned or operated by a federal agency. Federal facilities may operate under different regulatory regimes or reporting practices compared to private facilities. Including this variable allows us to test whether federal operations are more or less likely to report on-site releases.
+
+- **CLEAN AIR ACT CHEMICAL** (categorical: YES/NO)  
+  This flag indicates whether the reported chemical is also regulated as a hazardous air pollutant under the Clean Air Act. Chemicals regulated under multiple statutes may face stronger air emission controls, but they are also frequently used in large-scale industrial operations. This variable helps assess whether such regulations correlate with observed release behavior.
+
+- **CARCINOGEN** (categorical: YES/NO)  
+  This variable identifies chemicals that are classified as carcinogens under OSHA or other regulatory criteria. Carcinogens are subject to stricter occupational and environmental controls. Including this indicator tests whether carcinogenic chemicals are more or less likely to be released.
+
+- **PBT** (categorical: YES/NO)  
+  This flag marks chemicals that are **persistent, bioaccumulative, and toxic (PBT)**—a particularly hazardous group of substances that do not break down easily in the environment and accumulate in organisms. PBTs are among the highest-priority chemicals from an environmental health perspective. If facilities handling PBTs are more likely to release them on site, that carries especially important implications for policy and community risk.
+
+### Data Collection and Preprocessing
+
+For this project, I subset the 2024 TRI Basic Data File to include only records that:
+
+- Have non-missing values for ON-SITE RELEASE TOTAL and all predictors listed above.
+- Have valid and interpretable industry sector codes.
+- Fall within the continental United States and its territories (as defined by EPA in the Basic Data File download options [@epa_tri_basic_data]).
+
+Continuous variables were left on their original scales; no transformations were applied before model fitting, because the main goal was to examine assumption violations for the multiple linear regression and then motivate a shift to logistic regression. The binary RELEASE_FLAG variable was computed directly from ON-SITE RELEASE TOTAL as described above.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(broom)
+library(ggplot2)
+
+tri <- read_csv("tri_dataset.csv")
+
+numeric_vars <- c(
+  "ON-SITE RELEASE TOTAL",
+  "PRODUCTION WSTE",
+  "TREATMENT ON SITE",
+  "RECYCLING ON SITE",
+  "ONE-TIME RELEASE",
+  "PRODUCTION RATIO"
+)
+
+tri <- tri %>%
+  mutate(across(all_of(numeric_vars), ~ suppressWarnings(as.numeric(.)))) %>%
+  mutate(
+    `INDUSTRY SECTOR` = factor(`INDUSTRY SECTOR`),
+    `FEDERAL FACILITY` = factor(`FEDERAL FACILITY`),
+    `CLEAN AIR ACT CHEMICAL` = factor(`CLEAN AIR ACT CHEMICAL`),
+    `CARCINOGEN` = factor(`CARCINOGEN`),
+    `PBT` = factor(`PBT`)
+  )
+
+tri_clean <- tri %>%
+  filter(
+    !is.na(`ON-SITE RELEASE TOTAL`),
+    !is.na(`PRODUCTION WSTE`),
+    !is.na(`TREATMENT ON SITE`),
+    !is.na(`RECYCLING ON SITE`),
+    !is.na(`ONE-TIME RELEASE`),
+    !is.na(`PRODUCTION RATIO`),
+    !is.na(`INDUSTRY SECTOR`),
+    !is.na(`FEDERAL FACILITY`),
+    !is.na(`CLEAN AIR ACT CHEMICAL`),
+    !is.na(`CARCINOGEN`),
+    !is.na(`PBT`)
+  ) %>%
+  mutate(RELEASE_FLAG = ifelse(`ON-SITE RELEASE TOTAL` > 0, 1, 0))
+```
+
+Table 1 reports how many facility–chemical records are available before and after cleaning. The original file includes all reported records for 2024. After removing rows with missing values on the response or any of the predictors used in this study, 10,560 complete records remain. Since each row represents one facility handling one chemical in 2024, this final sample reflects the set of facilities and chemicals for which all variables required for the model are observed.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+
+
+numeric_vars <- c(
+"ON-SITE RELEASE TOTAL",
+"PRODUCTION WSTE",
+"TREATMENT ON SITE",
+"RECYCLING ON SITE",
+"ONE-TIME RELEASE",
+"PRODUCTION RATIO"
+)
+
+numeric_summary <- numeric_vars %>%
+map_df(~ tibble(
+Variable = .x,
+Range = sprintf("[%.2f, %.2f]",
+min(tri_clean[[.x]], na.rm = TRUE),
+max(tri_clean[[.x]], na.rm = TRUE))
+))
+
+categorical_vars <- c(
+"INDUSTRY SECTOR",
+"FEDERAL FACILITY",
+"CLEAN AIR ACT CHEMICAL",
+"CARCINOGEN",
+"PBT"
+)
+
+categorical_summary <- categorical_vars %>%
+map_df(~ tibble(
+Variable = .x,
+Levels = paste(levels(tri_clean[[.x]]), collapse = ", ")
+))
+
+
+dataset_summary <- tibble(
+Metric = c("Rows before cleaning", "Rows after cleaning", "Columns after cleaning"),
+Value = c(nrow(tri), nrow(tri_clean), ncol(tri_clean))
+)
+
+
+kable(dataset_summary, caption = "Table 1: Dataset Summary", booktabs = TRUE) %>%
+kable_styling(full_width = FALSE)
+
+```
+
+Table 2 shows the range of values for each numerical variable in the cleaned sample. All of these variables span wide intervals. Some facilities report very small amounts of waste or none at all, while others report very large quantities. These wide ranges tell us that the observations come from facilities of many different sizes and operations. They also help explain why the continuous release values do not fit well with a linear regression model, since most records report zero release while a small number report very large amounts.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+kable(numeric_summary, caption = "Table 2: Ranges of Numeric Variables", booktabs = TRUE) %>%
+kable_styling(full_width = FALSE)
+
+```
+
+Table 3 lists the levels for each categorical variable. The industry sector variable includes many different types of facilities, showing that the sample covers a wide mix of industrial activities. The hazard flags, such as whether a chemical is a carcinogen or a PBT chemical, include both yes and no responses. The federal facility indicator also includes both types of facilities. These variables help describe important differences among facilities and chemicals, which the regression model accounts for.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+kable(categorical_summary, caption = "Table 3: Levels of Categorical Variables", booktabs = TRUE) %>%
+kable_styling(full_width = FALSE)
+```
+
+## Descriptive Statistics
+
+The first figure shows the distribution of on-site release totals on a log scale. Most facility–chemical records report very small release amounts or none at all, while a smaller number report much larger values. Using a log scale makes it easier to see this spread. The shape of the distribution confirms that release totals vary widely across facilities, which is consistent with the idea that some operations handle far larger quantities of chemicals than others. This wide spread also helps explain why the continuous release totals do not fit well into a linear regression model.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(tri_clean, aes(x = `ON-SITE RELEASE TOTAL`)) +
+  geom_histogram(bins = 60, fill = "steelblue") +
+  scale_x_log10() +
+  labs(
+    title = "Distribution of On-Site Release Totals (Log Scale)",
+    x = "On-site release total (lbs, log10 scale)",
+    y = "Count"
+  ) +
+  theme_minimal()
+```
+The second figure shows boxplots for the main waste-management variables, again on a log scale. Each of these variables has many small values and a few very large ones. The boxes in the middle of each plot show that most facilities report relatively modest amounts, while the long whiskers and points show the presence of much larger values. These plots illustrate that the facilities handling TRI-listed chemicals differ greatly in size and activity, which is important context for later modeling.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+tri_clean %>%
+select(`PRODUCTION WSTE`, `TREATMENT ON SITE`, `RECYCLING ON SITE`, `ONE-TIME RELEASE`) %>%
+pivot_longer(everything(), names_to = "variable", values_to = "value") %>%
+ggplot(aes(x = variable, y = value)) +
+geom_boxplot() +
+scale_y_log10() +
+labs(title = "Waste Management Variables (log scale)", x = "", y = "Value (log scale)") +
+theme_minimal()
+```
+The third figure shows the probability that a facility reports any on-site release, separated by industry sector. The sectors are ordered from highest to lowest probability. Some industries, such as hazardous waste management and petroleum-related activities, have higher release rates, while others report releases less often. This figure shows that release behavior differs across industries, which is why industry sector is included as a predictor in the regression model.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+tri_clean %>%
+group_by(`INDUSTRY SECTOR`) %>%
+summarise(rate = mean(RELEASE_FLAG), n = n()) %>%
+ggplot(aes(x = reorder(`INDUSTRY SECTOR`, rate), y = rate)) +
+geom_col(fill = "darkred") +
+coord_flip() +
+labs(title = "Probability of Any On-Site Release by Sector",
+x = "Industry sector", y = "Release probability") +
+theme_minimal()
+```
+
+---
+
+## Methods {#sec-methods}
+
+The goal of this section is to describe the two statistical models used to study the research question. The first model treats the on-site release total as a continuous response and uses a multiple linear regression framework. This provides a starting point for assessing how the predictors relate to release amounts, even though the distribution of the response raises concerns for this approach. The second model focuses on whether any release occurs, which is a binary outcome, and uses logistic regression.
+
+### Multiple Linear Regression (MLR) model
+
+As an initial approach, we treat the continuous on-site release total as the outcome of interest (or the response variable) and fit a **multiple linear regression** model. Let
+
+
+
+$$
+Y_i = \text{on-site release total for facility–chemical record } i,
+$$
+
+$$
+X_{i1}, X_{i2}, \ldots, X_{ip} = \text{the production, waste, and chemical
+characteristics recorded for that observation}.
+$$
+We model the relationship as
+
+$$
+\begin{aligned}
+Y_i =\; &\beta_0
++ \beta_1(\text{Production Ratio})_i
++ \beta_2(\text{Production Waste})_i
++ \beta_3(\text{Treatment on Site})_i \\
+&+ \beta_4(\text{Recycling on Site})_i
++ \beta_5(\text{One-Time Release})_i
++ \text{Industry Sector Effects}_i \\
+&+ \beta_F(\text{Federal Facility})_i
++ \beta_C(\text{Clean Air Act Chemical})_i \\
+&+ \beta_K(\text{Carcinogen})_i
++ \beta_P(\text{PBT})_i
++ \varepsilon_i.
+\end{aligned}
+$$
+
+In this model, $\beta_0$ is the intercept. It represents the expected on-site release total for a record in the baseline levels of all categorical variables and with all numerical predictors equal to zero.
+
+The coefficients $\beta_1$ through $\beta_5$ describe how the average release amount changes with the numerical predictors. For example, $\beta_1$ measures the change in the expected release total associated with a one-unit increase in the production ratio, holding the other predictors fixed. The same interpretation applies to production waste, treatment on site, recycling on site, and one-time releases.
+
+The term $\text{Industry Sector Effects}_i$ represents the set of indicator variables created from the industry sector category. Each coefficient in this group compares a given sector with the baseline sector. These terms allow the model to capture differences in release behavior across sectors.
+
+The coefficients $\beta_F$, $\beta_C$, $\beta_K$, and $\beta_P$ measure the differences in expected releases associated with being a federal facility, reporting a Clean Air Act chemical, reporting a carcinogen, or handling a PBT chemical, respectively. Each of these describes how the average release amount changes when that indicator equals one rather than zero.
+
+The error term $\varepsilon_i$ accounts for variation in release totals that is not explained by the predictors in the model.
+
+
+### Assumptions of the Multiple Linear Regression Model
+
+For this model to provide reliable estimates and valid inference, several
+assumptions must hold:
+
+1. **Linearity**  
+   The average on-site release should change in a linear way with each predictor. This means that increases in production, waste, or hazard indicators should influence the response through a straight-line relationship within the range of the data.
+
+2. **Independence**  
+   The errors should be independent across observations. Each facility–chemical record is treated as a separate observation.
+
+3. **Constant variance**  
+   The spread of the errors should remain roughly the same across all fitted values. If the variance grows or shrinks systematically with the predicted release amount, this assumption is violated.
+
+4. **Normality**  
+   The errors should follow an approximately normal distribution. This supports the validity of the standard tests for the regression coefficients.
+
+Although the true errors are not observed, the residuals from the fitted model are used to check these assumptions. As shown later in the results section, the distribution of on-site release totals makes these assumptions difficult to satisfy, which helps motivate the use of a logistic regression model in the next part of the analysis.
+
+
+### Logistic regression model
+
+Logistic Regression is chosen as the second method of this regression analysis. Here, the response is whether a facility–chemical record reports any on-site release. This is a binary outcome mapped to **RELEASE_FLAG** variable, so we use a logistic regression model. For each record, let
+
+$$
+Y_i =
+\begin{cases}
+1, & \text{if the record reports any on-site release}, \\
+0, & \text{otherwise}.
+\end{cases}
+$$
+
+Let $p_i$ denote the probability that $Y_i = 1$ for record $i$. The logistic regression model relates this probability to the predictors through the logit link:
+
+$$
+\log\!\left(\frac{p_i}{1 - p_i}\right)
+= \alpha_0
++ \alpha_1(\text{Production Ratio})_i
++ \alpha_2(\text{Production Waste})_i
++ \alpha_3(\text{Treatment on Site})_i
++ \alpha_4(\text{Recycling on Site})_i
++ \alpha_5(\text{One-Time Release})_i \\
++ \text{Industry Sector Effects}_i
++ \alpha_F(\text{Federal Facility})_i
++ \alpha_C(\text{Clean Air Act Chemical})_i
++ \alpha_K(\text{Carcinogen})_i
++ \alpha_P(\text{PBT})_i.
+$$
+
+In this model, $\alpha_0$ is the intercept. The coefficients $\alpha_1$ through $\alpha_5$ describe how the log-odds of reporting any release change with the numerical predictors. Each coefficient represents the change in the log-odds of a release associated with a one-unit increase in that predictor, holding the others fixed.
+
+The industry sector term represents a set of indicator variables created from the sector classification. Each coefficient in this group compares a sector’s log-odds with the baseline sector.
+
+The coefficients $\alpha_F$, $\alpha_C$, $\alpha_K$, and $\alpha_P$ describe how the log-odds of reporting any release differ for federal facilities, for chemicals regulated under the Clean Air Act, for carcinogens, and for PBT chemicals, compared with their reference categories.
+
+To interpret these coefficients in terms of odds, we exponentiate them. For example, $\exp(\alpha_P)$ is the factor by which the odds of reporting any on-site release change when the record involves a PBT chemical rather than a non-PBT chemical, holding the other predictors fixed.
+
+---
+
+### Assumptions of the Logistic Regression Model
+
+1. **Correct link function**  
+   The logit link should describe how the predictors relate to the probability of a release. This means the model should capture the main pattern in how the predictors influence the likelihood of reporting any release.
+
+2. **Independence**  
+   Each facility–chemical record is treated as a separate observation, and the outcomes are assumed to be independent across records.
+
+3. **No perfect separation**  
+   The predictors should not divide the data into groups where the outcome is always one value or the other. If this occurs, the model cannot estimate the coefficients reliably.
+
+4. **Linearity in the logit**  
+   For numerical predictors, the log-odds should change in a roughly linear way with the predictor. This is checked using plots of the logit against each numerical variable.
+
+As with the multiple linear regression model, these assumptions are evaluated using diagnostic checks.
+
+---
+
+### Software Used 
+
+All analyses were conducted in R 4.5 [@rbase] and using RStudio.  After reading the CSV file, missing observations were removed.  The model was fit using the `lm()` function, which computes the least‑squares estimates and associated standard errors.  Diagnostic plots were examined to assess the validity of the linear regression assumptions. The residuals were roughly symmetric with no obvious pattern in the residual‑versus‑fitted plot, supporting the assumptions of linearity and homoscedasticity.  Observations correspond to distinct team‑seasons, so independence is reasonable.  The large sample size makes minor deviations from normality of errors inconsequential for inference.
+
+---
+
+## Results {#sec-results}
+
+### Fitted Model
+
+#### Multiple Linear Regression
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#| include: false
+#| warning: false
+#| message: false
+#| echo: false
+#| 
+mlr_model <- lm(
+  `ON-SITE RELEASE TOTAL` ~
+    `PRODUCTION RATIO` +
+    `PRODUCTION WSTE` +
+    `TREATMENT ON SITE` +
+    `RECYCLING ON SITE` +
+    `ONE-TIME RELEASE` +
+    `INDUSTRY SECTOR` +
+    `FEDERAL FACILITY` +
+    `CLEAN AIR ACT CHEMICAL` +
+    `CARCINOGEN` +
+    `PBT`,
+  data = tri_clean
+)
+
+summary(mlr_model)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(broom)
+library(knitr)
+library(kableExtra)
+library(dplyr)
+library(stringr)
+
+mlr_table <- tidy(mlr_model) %>%
+  mutate(
+    Term = case_when(
+      term == "(Intercept)" ~ "Intercept",
+      term == "`PRODUCTION RATIO`" ~ "Production Ratio",
+      term == "`PRODUCTION WSTE`" ~ "Production Waste",
+      term == "`TREATMENT ON SITE`" ~ "Treatment on Site",
+      term == "`RECYCLING ON SITE`" ~ "Recycling on Site",
+      term == "`ONE-TIME RELEASE`" ~ "One-Time Release",
+      term == "`FEDERAL FACILITY`YES" ~ "Federal Facility (Yes)",
+      term == "`CLEAN AIR ACT CHEMICAL`YES" ~ "Clean Air Act Chemical (Yes)",
+      term == "`CARCINOGEN`YES" ~ "Carcinogen (Yes)",
+      term == "`PBT`YES" ~ "PBT (Yes)",
+      
+      # Automatically clean industry sectors:
+      str_detect(term, "`INDUSTRY SECTOR`") ~ str_replace(term, "`INDUSTRY SECTOR`", "Industry Sector"),
+
+      TRUE ~ term
+    )
+  ) %>%
+  rename(
+    Estimate = estimate,
+    `Std. Error` = std.error,
+    `t value` = statistic,
+    `p value` = p.value
+  ) %>%
+  select(Term, Estimate, `Std. Error`, `t value`, `p value`)
+
+# Print table
+kable(mlr_table,
+      caption = "Table: Multiple Linear Regression Estimates",
+      digits = 4,
+      booktabs = TRUE) %>%
+  kable_styling(full_width = FALSE)
+```
+
+The fitted model relates on-site release totals to measures of production activity, waste management, facility type, chemical hazard indicators, and industry sector. Many of the numerical predictors have large estimated coefficients because the response is measured in pounds and spans several orders of magnitude. In this context, the coefficient magnitudes should be understood relative to the scale of TRI releases.
+
+Several coefficients stand out. The estimated coefficient for production waste is large and positive, indicating that facilities reporting greater production-related waste tend to report larger on-site releases, holding the other predictors constant. A similar pattern appears for one-time releases: the positive coefficient suggests that records with larger one-time release quantities tend to have higher total on-site releases. In contrast, the coefficients for treatment on site and recycling on site are negative, implying that facilities reporting more waste treated or recycled on site tend to have lower release totals. This is consistent with the idea that treatment and recycling activities offset the need for disposal or release.
+
+Because industry sector is represented by a collection of indicator variables, each sector coefficient measures how the average release total for that sector differs from the baseline sector. For example, the coefficient for fabricated metals is positive and statistically significant, meaning that facilities in that sector are estimated to release more, on average, than facilities in the baseline sector, after controlling for the other predictors.
+
+Binary indicators such as federal facility, carcinogen, Clean Air Act chemical, and PBT chemical have relatively small estimated effects compared with the waste-related predictors, and several are not statistically significant at conventional levels. This suggests that once production and waste quantities are accounted for, these hazard flags contribute less to explaining variation in release totals.
+
+Statistical significance for each coefficient is assessed using a two-sided $t$-test of
+
+$$
+H_0 : \beta_j = 0
+\qquad \text{versus} \qquad
+H_A : \beta_j \neq 0.
+$$
+
+For example, the coefficient for production waste is highly significant, with a very small $p$-value. This test evaluates whether the relationship between production-related waste and on-site release totals is strong enough to conclude that waste quantities truly explain variation in releases, rather than the observed association being due to random variability in the error term
+$\varepsilon_i$. The small $p$-value provides strong evidence against $H_0$, indicating that production waste is an important predictor of on-site release totals in this dataset.
+
+A contrasting example is the coefficient for federal facility. Its $p$-value is large, providing little evidence to reject the null hypothesis that federal and non-federal facilities have the same average release totals once the other predictors are included. In this case, the model does not provide evidence that federal status influences release magnitude beyond what is explained by production and waste variables.
+
+#### Logistic Regression
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+model_logistic <- glm(
+  `RELEASE_FLAG` ~
+    `PRODUCTION RATIO` +
+    `PRODUCTION WSTE` +
+    `TREATMENT ON SITE` +
+    `RECYCLING ON SITE` +
+    `ONE-TIME RELEASE` +
+    `INDUSTRY SECTOR` +
+    `FEDERAL FACILITY` +
+    `CLEAN AIR ACT CHEMICAL` +
+    `CARCINOGEN` +
+    `PBT`,
+  data = tri_clean,
+  family = binomial
+)
+summary(model_logistic)
+
+
+```
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(broom)
+library(kableExtra)
+library(stringr)
+library(dplyr)
+
+logit_table <- tidy(model_logistic) %>%
+  mutate(
+    Term = case_when(
+      term == "(Intercept)" ~ "Intercept",
+      term == "`PRODUCTION RATIO`" ~ "Production Ratio",
+      term == "`PRODUCTION WSTE`" ~ "Production Waste",
+      term == "`TREATMENT ON SITE`" ~ "Treatment on Site",
+      term == "`RECYCLING ON SITE`" ~ "Recycling on Site",
+      term == "`ONE-TIME RELEASE`" ~ "One-Time Release",
+
+      # hazard indicators
+      term == "`FEDERAL FACILITY`YES" ~ "Federal Facility (Yes)",
+      term == "`CLEAN AIR ACT CHEMICAL`YES" ~ "Clean Air Act Chemical (Yes)",
+      term == "`CARCINOGEN`YES" ~ "Carcinogen (Yes)",
+      term == "`PBT`YES" ~ "PBT (Yes)",
+
+      # industry sectors
+      str_detect(term, "`INDUSTRY SECTOR`") ~
+        str_replace(term, "`INDUSTRY SECTOR`", "Industry Sector"),
+
+      TRUE ~ term
+    )
+  ) %>%
+  rename(
+    Estimate = estimate,
+    `Std. Error` = std.error,
+    `z value` = statistic,
+    `p value` = p.value
+  ) %>%
+  select(Term, Estimate, `Std. Error`, `z value`, `p value`)
+
+kable(logit_table,
+      caption = "Table: Logistic Regression Estimates for Probability of Any On-Site Release",
+      digits = 4,
+      booktabs = TRUE) %>%
+  kable_styling(full_width = FALSE)
+
+```
+
+The logistic regression model relates the probability that a facility–chemical record reports any on-site release to production activity, waste management quantities, hazard characteristics, and industry sector. Because the model uses the logit link, each coefficient represents the change in the log-odds of reporting any release associated with a one-unit change in the predictor, holding the other variables fixed.
+
+Several predictors have strong associations with release probability. The coefficient for production waste is large and positive, indicating that records reporting greater production-related waste have higher odds of reporting a release. A similar pattern appears for one-time releases, whose positive coefficient suggests that non-routine release activity is strongly associated with the presence of any on-site release in the dataset.
+
+Recycling on site has a negative coefficient, which implies that facilities reporting more recycling tend to be less likely to release waste. This is consistent with how recycling offsets disposal needs. Treatment on site has a small and statistically insignificant effect, suggesting that treatment activities do not meaningfully change the odds of reporting a release once other predictors are included.
+
+Several industry sectors differ substantially from the baseline sector after controlling for production and waste flows. For example, transportation equipment and petroleum bulk terminals have positive and significant coefficients, indicating higher release likelihoods relative to the baseline sector, while other sectors such as textilesor leather show little evidence of meaningful differences.
+
+The hazard indicators also reveal important patterns. Records involving PBT (persistent, bioaccumulative, and toxic) chemicals have sharply higher odds of reporting any release, as reflected by a large and highly significant coefficient. Clean Air Act chemicals also show elevated odds, while carcinogens do not show a significant difference from their non-carcinogenic counterparts in the presence of the other predictors.
+
+Together, these results suggest that both operational scale (as reflected by waste quantities) and chemical hazard classifications play important roles in determining whether a release is reported.
+
+Logistic regression coefficients are estimated using maximum likelihood rather than ordinary least squares. Under standard regularity conditions, maximum likelihood estimators are asymptotically normal, so each coefficient $\hat{\alpha}_j$ has an approximately normal sampling distribution for large samples. Because the variance is obtained from the likelihood rather than from an estimate of the error variance, the appropriate test statistic is
+
+$$
+z = \frac{\hat{\alpha}_j}{\text{SE}(\hat{\alpha}_j)},
+$$
+
+which is compared to the standard normal distribution under $H_0 : \alpha_j = 0$. This is why logistic regression uses a $z$-test, while multiple linear regression uses a $t$-test. Therefore, the statistical significance for each coefficient in the logistic regression model:
+
+$$
+H_0 : \alpha_j = 0
+\qquad \text{versus} \qquad
+H_A : \alpha_j \neq 0.
+$$
+
+This test evaluates whether predictor $X_j$ is associated with a change in the log-odds of reporting any on-site release after controlling for the other variables. For example, the coefficient for production waste is large and highly significant, with a very small $p$-value. This provides strong evidence against $H_0$, indicating that production waste meaningfully increases the odds that a
+release occurs. In practical terms, facilities with large production-related waste streams are much more likely to report at least one release.
+
+In contrast, the coefficient for federal facility has a large $p$-value, indicating little evidence to reject the null hypothesis that federal and non-federal facilities have the same release probability once production and waste-management variables are included. Here the data do not support the claim that federal status alone affects the likelihood of reporting a release.
+
+
+## Goodness of fit and interpretation
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(ggplot2)
+library(broom)
+
+# Augment dataset with fitted values
+mlr_aug <- augment(mlr_model)
+
+ggplot(mlr_aug, aes(x = .fitted, y = `ON-SITE RELEASE TOTAL`)) +
+  geom_point(alpha = 0.4) +
+  geom_abline(intercept = 0, slope = 1, color = "red", linewidth = 1) +
+  labs(
+    title = "Observed vs Predicted On-Site Release Totals",
+    x = "Predicted release total",
+    y = "Observed release total"
+  ) +
+  theme_minimal()
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(ggplot2)
+library(broom)
+
+mlr_aug <- augment(mlr_model)
+
+ggplot(mlr_aug, aes(x = .fitted, y = `ON-SITE RELEASE TOTAL`)) +
+  geom_point(alpha = 0.4) +
+  geom_abline(intercept = 0, slope = 1, color = "red", linewidth = 1) +
+  coord_cartesian(
+    xlim = c(0, 500000),       # adjust this limit as needed
+    ylim = c(0, 500000)
+  ) +
+  labs(
+    title = "Observed vs Predicted On-Site Release Totals (Zoomed View)",
+    x = "Predicted release total",
+    y = "Observed release total"
+  ) +
+  theme_minimal()
+
+```
+
+
+
+
+
+```{r, fig.width=10, fig.height=6}
+
+par(mfrow = c(1, 2))      # two plots in one row
+
+plot(
+  mlr_model,
+  which = 1,
+  main = "Residuals vs Fitted Values"
+)
+
+plot(
+  mlr_model,
+  which = 2,
+  main = "Normal Q–Q Plot"
+)
+
+par(mfrow = c(1, 1))      # reset layout
+```
+
+The linear regression model shows substantial violations of core modeling assumptions, indicating that it is not suitable for explaining variation in on-site release totals. The residuals-versus-fitted plot reveals strong curvature and a funnel-shaped pattern, showing that the relationship between predictors and release totals is not linear and that prediction errors grow rapidly with release magnitude. This violates both the linearity and constant-variance assumptions.
+
+The normal Q–Q plot shows extreme departures from normality, with heavy tails produced by very large positive and negative residuals. Because TRI release totals span several orders of magnitude, the error distribution is highly skewed, making standard linear regression inference unreliable. In addition, the observed-versus-predicted plot demonstrates poor predictive performance: most predicted values fall near zero while actual releases vary widely, meaning the model captures little of the meaningful variation in the data.
+
+Finally, the fitted model is heavily influenced by a small number of extremely large releases, and several predictors (particularly production waste and treatment on site) are likely correlated with one another and with facility size, complicating interpretation. Together, these issues show that modeling raw release totals with a linear model is not appropriate. These limitations motivate the shift to logistic regression, which models the probability of any on-site release rather than attempting to explain the highly skewed release magnitudes themselves. Because of these issues, we do not use the MLR model to draw substantive conclusions. Instead, we treat it as evidence that a continuous Gaussian response model is poorly matched to the distribution of TRI release totals and that a different modeling strategy is needed.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+tri_clean$pred_prob <- predict(model_logistic, type = "response")
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(tri_clean, aes(x = pred_prob, y = RELEASE_FLAG)) +
+  geom_jitter(height = 0.1, alpha = 0.3) +
+  labs(
+    title = "Predicted Probability of On-Site Release",
+    x = "Predicted Probability",
+    y = "Observed Release (0 or 1)"
+  ) +
+  theme_minimal()
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(dplyr)
+library(ggplot2)
+
+calibration_df <- tri_clean %>%
+  mutate(prob_bin = cut(pred_prob, breaks = seq(0,1,0.1), include.lowest = TRUE)) %>%
+  group_by(prob_bin) %>%
+  summarise(
+    mean_pred = mean(pred_prob),
+    mean_obs  = mean(RELEASE_FLAG),
+    n = n()
+  )
+
+ggplot(calibration_df, aes(x = mean_pred, y = mean_obs)) +
+  geom_point(size = 3) +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  labs(
+    title = "Calibration Plot (Logistic Regression)",
+    x = "Mean Predicted Probability",
+    y = "Observed Release Rate"
+  ) +
+  theme_minimal()
+
+```
+
+### Logistic regression: main effects and model fit
+
+The logistic regression model with RELEASE_FLAG as the response substantially improves the alignment between the method and the data. Comparing the deviance of the full model to the null model shows a large reduction (from approximately 9347 to 3398 in one representative fit), and the associated likelihood ratio test strongly rejects the null hypothesis that all non-intercept coefficients are zero. In other words, the selected predictors collectively provide substantial information about whether a facility–chemical record has any on-site release.
+
+Several predictors emerge as important:
+
+- **Production-related waste (PRODUCTION WSTE):** A positive coefficient indicates that records with higher production-related waste have higher odds of reporting any on-site release, holding other variables constant. This matches the expectation that larger waste streams are harder to fully contain.
+
+- **Production ratio (PRODUCTION RATIO):** Increased production relative to the prior year is associated with higher release odds, suggesting that growth in activity can elevate risk.
+
+- **On-site recycling (RECYCLING ON SITE):** The coefficient is positive but smaller, indicating that facilities with more on-site recycling are somewhat more likely to report releases. This may reflect the fact that recycling occurs primarily in larger, more chemically intensive operations.
+
+- **One-time releases (ONE-TIME RELEASE):** As expected, the presence and magnitude of non-routine releases are strongly associated with the probability that any release occurs. Records with higher one-time release amounts have much greater odds of being release-positive.
+
+- **Federal facility (FEDERAL FACILITY = YES):** Federal facilities show significantly higher odds of on-site release compared to non-federal facilities, after controlling for other variables. This may reflect differences in mission (for example, military or energy installations) and the mix of chemicals used.
+
+- **Clean Air Act chemical (CLEAN AIR ACT CHEMICAL = YES):** Chemicals regulated under the Clean Air Act are more likely to be associated with on-site releases, which may be due to their use in large-scale industrial processes.
+
+- **Carcinogen (CARCINOGEN = YES):** Carcinogenic chemicals show higher odds of release, indicating that even enhanced regulatory scrutiny does not fully eliminate release risk for this class of substances.
+
+- **PBT (PBT = YES):** PBT chemicals have one of the largest positive coefficients, indicating that the odds of any on-site release are substantially higher for persistent, bioaccumulative, and toxic substances than for non-PBT chemicals, all else equal. The corresponding p-value is extremely small, providing strong evidence against the null hypothesis that PBT status has no effect.
+
+Several industry sectors also exhibit statistically significant positive or negative coefficients relative to the baseline sector, reflecting sector-specific differences in chemical use and process technologies.
+
+### Interpretation of a specific hypothesis test: PBT status
+
+To illustrate the interpretation of p-values more concretely, consider again the coefficient for PBT:
+
+- **Test:** Wald z-test on the logistic regression coefficient for PBT = YES.
+- **Null hypothesis:** $(H_0: \alpha_{P} = 0)$ (PBT status has no effect on the log-odds of any on-site release).
+- **Alternative hypothesis:** $(H_A: \alpha_{P} \neq 0)$.
+- **Assumptions:** The logistic regression model is correctly specified, observations are conditionally independent, and the standard large-sample approximations apply.
+
+Under these assumptions, a very small p-value (for example, less than 0.001) is evidence against $(H_0)$, indicating that PBT status is statistically significantly associated with release probability. In terms of odds ratios, $(\exp(\alpha_{P}) > 1)$ implies that handling PBT chemicals increases the odds of any on-site release, even after controlling for production intensity, waste management, industry sector, and other hazard flags.
+
+### LASSO-penalized logistic regression
+
+The LASSO logistic regression model, tuned by cross-validation, retains most of the predictors highlighted above:
+
+- Production ratio, production-related waste, and one-time releases remain strong positive predictors.
+- Hazard flags (PBT, carcinogen, Clean Air Act chemical) all retain non-zero coefficients.
+- Federal facility status remains important.
+- Several industry sectors have non-zero coefficients, while others are shrunk to zero, indicating limited incremental predictive value.
+
+Other variables, such as on-site treatment and some less prevalent industry sectors, are penalized to zero, suggesting that they do not add much explanatory power once the main predictors are included. This regularized model confirms the key patterns seen in the unpenalized logistic regression while simplifying the set of predictors.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+tri_clean$pred_prob <- predict(model_logistic, type = "response")
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(tri_clean, aes(x = pred_prob, y = RELEASE_FLAG)) +
+  geom_jitter(height = 0.1, alpha = 0.3) +
+  labs(
+    title = "Predicted Probability of On-Site Release",
+    x = "Predicted Probability",
+    y = "Observed Release (0 or 1)"
+  ) +
+  theme_minimal()
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(dplyr)
+library(ggplot2)
+
+calibration_df <- tri_clean %>%
+  mutate(prob_bin = cut(pred_prob, breaks = seq(0,1,0.1), include.lowest = TRUE)) %>%
+  group_by(prob_bin) %>%
+  summarise(
+    mean_pred = mean(pred_prob),
+    mean_obs  = mean(RELEASE_FLAG),
+    n = n()
+  )
+
+ggplot(calibration_df, aes(x = mean_pred, y = mean_obs)) +
+  geom_point(size = 3) +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  labs(
+    title = "Calibration Plot (Logistic Regression)",
+    x = "Mean Predicted Probability",
+    y = "Observed Release Rate"
+  ) +
+  theme_minimal()
+
+```
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(ggplot2)
+library(broom)
+
+# Augment data with model diagnostics
+log_aug <- augment(model_logistic, type.predict = "response", type.residuals = "deviance")
+
+ggplot(log_aug, aes(x = .fitted, y = .resid)) +
+  geom_point(alpha = 0.3) +
+  geom_hline(yintercept = 0, color = "red", linewidth = 1) +
+  geom_smooth(se = FALSE, color = "blue") +
+  labs(
+    title = "Deviance Residuals vs Fitted Probabilities (Logistic Regression)",
+    x = "Fitted Probability",
+    y = "Deviance Residual"
+  ) +
+  theme_minimal()
+```
+The logistic regression model provides a substantially better fit than the linear regression model because it targets a binary outcome (whether any on-site release occurred) rather than attempting to model skewed release totals. The deviance residual plot shows residuals centered around zero across most fitted probabilities, with only mild curvature in the smoothed trend line. Although a cluster of large negative residuals appears near predicted probabilities close to one, this behavior is typical when the model encounters observations that contradict strong predicted probabilities. The residual structure is more stable and interpretable than in the linear model, whose residuals displayed extreme magnitude and nonlinearity.
+
+The calibration plot shows that mean predicted probabilities closely match observed release rates across probability intervals, with points lying near the 45-degree reference line. The predicted-vs-observed scatter reinforces this by indicating that facilities reporting releases tend to receive higher predicted probabilities, while those without releases cluster at lower probabilities. This separation demonstrates predictive usefulness that was entirely absent in the linear regression model, whose predictions were compressed near zero for nearly all observations.
+
+Hypothesis tests based on z-statistics (appropriate because logistic regression coefficients are maximum likelihood estimators with asymptotic normality) indicate that several predictors—such as production waste and one-time releases—significantly increase the likelihood of reporting any release. Others, such as federal facility status, show no evidence of association after adjusting for production and chemical characteristics. These results are meaningful because the logistic model avoids the extreme variance and skewness that rendered linear-model coefficients uninterpretable.
+
+Deviance residuals are used instead of ordinary residuals because logistic regression does not model additive normal errors. Deviance residuals measure each observation’s contribution to the log-likelihood and provide the correct scale for diagnosing lack of fit in a binary-outcome generalized linear model.
+
+Taken together, the diagnostics show that logistic regression is far better suited to the structure of the TRI data. It avoids the violations that undermined the multiple linear regression model and yields predictions, residuals, and inference that align with the assumptions of a well-specified model.
+---
+
+## Discussion {#sec-discussion}
+
+This study examined which facility- and chemical-level characteristics predict whether a facility reports any on-site release in the 2024 TRI Basic Data File. Beginning with a multiple linear regression model on the continuous release totals helped clarify the structure of the data, but the model diagnostics showed that this approach was not appropriate for explaining variation in release amounts. The observed–versus–predicted plot indicated that nearly all fitted values were close to zero even when observed releases ranged across several orders of magnitude. The residuals showed strong curvature and substantial heteroskedasticity, and the Q–Q plot revealed heavy tails far from the theoretical normal line. These patterns reflect the extreme zero-inflation and long right tail of release totals in the TRI data. Because the linear model’s assumptions of linearity, constant variance, and normal errors were severely violated, the fitted coefficients cannot be interpreted reliably. The linear regression results therefore served primarily to motivate a model that better matches the distributional shape of TRI releases.
+
+Recasting the problem as a question about the probability of any release provided a clearer modeling framework. The logistic regression model directly targets the event of reporting a release and aligns more naturally with the data structure. The fitted model showed that operational scale—captured by production waste and one-time releases—is strongly associated with the likelihood of reporting a release. Facilities handling PBT chemicals or Clean Air Act hazardous air pollutants also exhibited higher release probabilities, even after adjusting for industry sector and waste-management practices. These findings are consistent with the descriptive statistics, which showed substantial variation across industry sectors and hazard classifications.
+
+The diagnostic plots for the logistic regression support the idea that this model fits the data substantially better than the linear regression. Deviance residuals were centered near zero across most fitted probabilities, and the smooth trend showed only minor curvature, indicating no serious misspecification. The calibration plot showed that predicted probabilities tracked observed release rates across probability bins, suggesting that the model captures the main structure of the relationship between predictors and release occurrence. The predicted-versus-observed plot further indicated that high predicted probabilities corresponded to observed releases, while low predictions aligned with non-releases. Together, these diagnostics show that logistic regression provides stable estimates and interpretable inference in a setting where the linear model struggled.
+
+There are, however, several limitations to consider. TRI data are self-reported and may contain measurement or reporting inconsistencies, particularly for waste-management quantities and one-time releases. The model treats each facility–chemical record as independent, even though facilities may appear multiple times for different chemicals. A mixed-effects model could capture facility-level dependence more formally. In addition, the analysis focuses on a single reporting year; facilities’ release behavior may change over time, and a longitudinal model could help capture systematic trends. Finally, although logistic regression performs well for predicting the occurrence of a release, it does not address the size of releases among those that do occur. Models designed for semi-continuous or zero-inflated responses may better handle that part of the problem.
+
+Despite these limitations, the results provide a clear conclusion: predictors related to operational scale and chemical hazard classifications strongly influence whether a release is reported, and logistic regression is a more suitable framework for studying this outcome than a linear model of raw releases. This modeling approach offers a foundation for future work aimed at understanding release severity or identifying facility characteristics that can inform targeted regulatory or pollution-prevention efforts.
+---
+
+## References
