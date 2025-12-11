@@ -2,7 +2,7 @@
 
 ## Author(s) and Date of Submission
 **Author:** Prasanna Sai Rohit Durbha  
-**Date of Submission:** `r format(Sys.Date(), "%B %d, %Y")`
+**Date of Submission:** 10th December 2025
 
 ## Project Structure
 
