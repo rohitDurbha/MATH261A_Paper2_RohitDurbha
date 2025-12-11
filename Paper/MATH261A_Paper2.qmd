@@ -28,13 +28,7 @@ The findings indicate that operational intensity, non-routine one-time releases,
 
 ### Observational units and population
 
-The data comes from the **2024 TRI Basic Data File**, which the EPA describes as containing “the data elements most frequently requested by TRI data users,” including facility information, chemical identification, on-site release quantities, off-site transfers, and summary waste-management data [@epa_tri_reporting]. Each **row** in this Basic Data File represents a **single facility–chemical–year record**. Concretely:
-
-- A facility is a specific industrial site (for example, a chemical plant or metal fabrication facility) that meets TRI reporting thresholds (A facility meets TRI reporting thresholds if it is covered by the TRI program or is a federal facility, has 10 or more full-time employees, uses or processes TRI-listed chemicals, and exceeds the annual activity thresholds for a listed chemical or chemical category).
-- A chemical is one TRI-listed substance (or chemical category) covered under the TRI program. (Mercury, Lead, Barium)
-- For the 2024 reporting year, a facility that handles three TRI chemicals will contribute three rows or one row per chemical.
-
-Therefore, the observational unit in this analysis is: One facility–chemical record for the 2024 TRI reporting year.
+The data comes from the **2024 TRI Basic Data File**, which the EPA describes as containing “the data elements most frequently requested by TRI data users,” including facility information, chemical identification, on-site release quantities, off-site transfers, and summary waste-management data [@epa_tri_reporting]. Each **row** in this Basic Data File represents a **single facility–chemical–year record**. More specifically, A facility is a specific industrial site (for example, a chemical plant or metal fabrication facility) that meets TRI reporting thresholds (A facility meets TRI reporting thresholds if it is covered by the TRI program or is a federal facility, has 10 or more full-time employees, uses or processes TRI-listed chemicals, and exceeds the annual activity thresholds for a listed chemical or chemical category). A chemical is one TRI-listed substance (or chemical category) covered under the TRI program. (Mercury, Lead, Barium). For the 2024 reporting year, a facility that handles three TRI chemicals will contribute three rows or one row per chemical. Therefore, the observational unit in this analysis is: One facility–chemical record for the 2024 TRI reporting year.
 
 Some facilities appear multiple times in the dataset if they handle multiple chemicals. Some chemicals also appear in many facilities. The analysis generalizes to the population of all facilities subject to TRI reporting requirements in 2024 in the United States, recognizing that TRI is not a simple random sample but effectively a census of covered facilities and chemicals [ @epa_tri_reporting].
 
